@@ -1,0 +1,113 @@
+# ==============================================================================
+# Python & Bytecode Cache
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==============================================================================
+# Virtual Environments (uv, venv, conda)
+# ==============================================================================
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ==============================================================================
+# Data Files (Keep directory structure with .gitkeep)
+# 대용량 및 원본/가공 데이터셋은 Git 추적에서 제외
+# ==============================================================================
+data/raw/*
+!data/raw/.gitkeep
+
+data/processed/*
+!data/processed/.gitkeep
+
+# 대용량/임시 데이터 포맷
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.sqlite
+*.sqlite3
+*.db
+
+# ==============================================================================
+# Environment Variables & Secrets (보안 및 인증 정보)
+# ==============================================================================
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+!.env.example
+secrets.json
+credentials.json
+api_key*.txt
+
+# ==============================================================================
+# Jupyter Notebook & Caches
+# ==============================================================================
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+*.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# ==============================================================================
+# Logs & Temporary Files
+# ==============================================================================
+*.log
+logs/
+temp/
+tmp/
+
+# ==============================================================================
+# Operating System & IDE Configurations
+# ==============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# VS Code & JetBrains
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
