@@ -52,6 +52,7 @@ venv.bak/
 # ==============================================================================
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/sgg_codes.json
 
 data/processed/*
 !data/processed/.gitkeep
