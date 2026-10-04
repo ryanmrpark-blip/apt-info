@@ -1,0 +1,55 @@
+name: Daily Nationwide Apartment Trades Fetch
+
+on:
+  schedule:
+    # 매일 21:00 UTC (한국 시간 기준 익일 06:00 KST) 실행
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    # 수동 트리거 지원
+    inputs:
+      days:
+        description: '수집 대상 일수 (최근 N일간)'
+        required: false
+        default: '7'
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-and-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install Dependencies
+        run: uv sync --frozen
+
+      - name: Run Fetch Pipeline
+        env:
+          DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+        run: |
+          uv run python src/main.py --fetch --days ${{ github.event.inputs.days || '7' }}
+
+      - name: Commit and Push Updated Parquet Data
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/processed/recent_trades.parquet
+          if git diff --staged --quiet; then
+            echo "변경되거나 새로 수집된 실거래가 데이터가 없습니다."
+          else
+            git commit -m "chore(data): 국토교통부 아파트 매매 실거래가 최신 데이터 갱신 [skip ci]"
+            git push
+          fi

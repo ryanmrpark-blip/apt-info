@@ -243,3 +243,7 @@ def collect_recent_nationwide_trades(
     }
     logger.info("수집 및 적재 완료 요약: %s", summary)
     return summary
+
+
+# 외부 호출 편의성을 위한 파이프라인 진입점 별칭(alias)
+run_pipeline = collect_recent_nationwide_trades
