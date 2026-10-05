@@ -51,5 +51,6 @@ jobs:
             echo "변경되거나 새로 수집된 실거래가 데이터가 없습니다."
           else
             git commit -m "chore(data): 국토교통부 아파트 매매 실거래가 최신 데이터 갱신 [skip ci]"
-            git push
+            git pull --rebase origin master
+            git push origin master
           fi
