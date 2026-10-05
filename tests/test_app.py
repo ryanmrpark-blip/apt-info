@@ -40,6 +40,13 @@ class TestApp(unittest.TestCase):
         self.assertEqual(format_amount(125400), "12억 5,400만 원")
         self.assertEqual(format_amount(0), "0원")
 
+    def test_multipage_structure(self) -> None:
+        """Streamlit 멀티페이지 구조(pages/ 디렉토리) 및 상세 페이지가 정상 존재하는지 검증합니다."""
+        pages_dir = ROOT_DIR / "pages"
+        self.assertTrue(pages_dir.exists() and pages_dir.is_dir(), "pages 디렉토리가 존재해야 합니다.")
+        daily_page = pages_dir / "1_📅_일자별_거래내역.py"
+        self.assertTrue(daily_page.exists(), "일자별 거래내역 페이지 파일이 존재해야 합니다.")
+
 
 if __name__ == "__main__":
     unittest.main()

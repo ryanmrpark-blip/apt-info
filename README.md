@@ -11,14 +11,12 @@
    - 월 경계(매월 1~7일) 자동 감지하여 이전 달과 당월 데이터를 동시 취합.
    - 거래 취소 건(`cdealType == 'O'`) 자동 필터링 및 거래금액 정수화(`만원 단위`).
 2. **SQLite + Parquet + DuckDB 3계층 데이터 아키텍처**:
-   - **SQLite**: 중복 없는 고유 거래 ID 기반 영구 마스터 데이터베이스 (신규 건만 Upsert/Insert).
+   - **SQLite**: 중복 없는 고유 거래 ID 기반 영구 마스터 데이터베이스 (`apt_trades`) 및 일자별 핵심 통계 영구 관리 테이블(`daily_trade_summary`).
    - **Parquet**: Streamlit 및 GitHub 무료 배포에 최적화된 Snappy 압축 컬럼형 스냅샷 (초경량).
    - **DuckDB**: 브라우저/서버 메모리 상에서 Parquet 파일을 직접 SQL 쿼리하는 초고속 OLAP 분석 엔진.
-3. **Streamlit 반응형 4대 탭 대시보드**:
-   - **전국 실거래 현황**: 핵심 KPI 카드(총 거래량, 최고가, 평균 거래가, 평균 평당가), 시도별 거래량/평당가 막대 차트, 일자별 거래량 추이.
-   - **지역 & 단지 랭킹**: 최고가 거래 단지 TOP 10, 최다 거래 단지 TOP 10, 시군구별 평당가 랭킹.
-   - **신고가 및 특이 거래**: 최근 거래 중 전고가 경신 단지, 평당가 상위 5% 프리미엄 거래, 직전 대비 급등/급락 거래 탐지.
-   - **실거래가 상세 탐색기**: 전용면적, 층수, 거래일자, 건축년도 다차원 필터링 및 원클릭 CSV 다운로드.
+3. **Streamlit 멀티페이지 반응형 대시보드**:
+   - **종합 대시보드 (`app.py`)**: 4대 탭(전국 실거래 현황, 지역 & 단지 랭킹, 신고가 및 특이 거래, 실거래가 상세 탐색기).
+   - **일자별 상세 조회 전용 페이지 (`pages/1_📅_일자별_거래내역.py`)**: 특정 일자 선택 시 5대 KPI 카드(거래량, 대금, 평균가, 평당가, 최고가 단지), 시도별 거래량/평균가 막대 차트, 가격대별 도넛 차트, 다차원 필터링 그리드 및 CSV 내보내기.
 4. **GitHub Actions & Streamlit Cloud 무료 자동 배포**:
    - 매일 한국 시간 06:00 (UTC 21:00) GitHub Actions Cron 실행 -> 최신 7일 데이터 수집 -> `recent_trades.parquet` 자동 커밋 & 푸시.
    - Streamlit Community Cloud가 저장소 변경을 감지하여 대시보드 자동 갱신.
@@ -37,26 +35,28 @@ apt-info/
 │   ├── raw/
 │   │   └── sgg_codes.json         # 전국 250개 시군구 법정동 코드 매핑 테이블
 │   └── processed/
-│       ├── apt_trades.db          # SQLite 영구 마스터 DB (로컬 보관, Git 제외)
+│       ├── apt_trades.db          # SQLite 영구 마스터 DB & 일자별 요약 테이블 (로컬 보관)
 │       └── recent_trades.parquet  # 최근 7일 실거래가 스냅샷 (GitHub 배포 대상)
-├── docs/                          # 프로젝트 설계 명세서 및 계획서 (Git 제외)
+├── docs/                          # 프로젝트 설계 명세서 및 구현 계획서
+├── pages/
+│   └── 1_📅_일자별_거래내역.py   # Streamlit 일자별 상세 실거래 조회 전용 페이지
 ├── reports/
 │   ├── figures/                   # 분석 차트 이미지
 │   └── report.md                  # 실거래가 데이터 EDA 종합 분석 보고서
 ├── src/
 │   ├── __init__.py                # 패키지 초기화
 │   ├── constants.py               # 시도/시군구 코드 매핑 및 유틸
-│   ├── db_queries.py              # DuckDB 기반 OLAP 분석 쿼리 모듈
+│   ├── db_queries.py              # DuckDB OLAP 분석 및 일자별 SQLite 쿼리 모듈
 │   ├── fetch_api.py               # 국토교통부 Open API 비동기 수집 파이프라인
 │   ├── main.py                    # 통합 CLI 실행 진입점
-│   ├── storage.py                 # SQLite 적재 및 Parquet 스냅샷 추출 모듈
+│   ├── storage.py                 # SQLite 적재, 일자별 요약 동기화 및 Parquet 스냅샷 모듈
 │   └── utils.py                   # 경로 계산 및 공통 유틸리티
-├── tests/                         # 단위 테스트 스위트 (총 24개 테스트)
+├── tests/                         # 단위 테스트 스위트 (총 34개 테스트)
 ├── app.py                         # Streamlit 대시보드 메인 웹 애플리케이션
 ├── pyproject.toml                 # uv 패키지 메타데이터 및 의존성 설정
 ├── .env.example                   # 환경 변수 템플릿
 ├── README.md                      # 프로젝트 사용 안내서
-└── .gitignore                     # Git 제외 설정 (.env, docs, sqlite 등 보안/용량 제외)
+└── .gitignore                     # Git 제외 설정 (.env, sqlite 등 보안/용량 제외)
 ```
 
 ---
