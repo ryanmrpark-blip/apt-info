@@ -67,6 +67,28 @@ def init_db(db_path: Optional[Path] = None) -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_deal_date ON apt_trades(deal_date);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_sido_sgg ON apt_trades(sido_nm, sgg_nm);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_apt_name ON apt_trades(apt_nm);")
+
+        # 일자별 집계 요약 영구 관리 테이블 생성
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_trade_summary (
+                deal_date TEXT PRIMARY KEY,
+                total_trades INTEGER NOT NULL,
+                total_amount INTEGER NOT NULL,
+                avg_amount REAL NOT NULL,
+                avg_price_per_pyeong REAL NOT NULL,
+                max_amount INTEGER NOT NULL,
+                max_apt_name TEXT,
+                max_sgg_nm TEXT,
+                direct_deal_count INTEGER NOT NULL,
+                broker_deal_count INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_summary_date ON daily_trade_summary(deal_date DESC);"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -140,34 +162,34 @@ def save_trades_to_sqlite(trades: list[dict], db_path: Optional[Path] = None) ->
     insert_rows: list[tuple] = []
     for item in trades:
         # 해제된 거래는 스킵
-        cdeal = str(item.get("cdealType", "")).strip().upper()
+        cdeal = str(item.get("cdealType") or item.get("cdeal_type", "")).strip().upper()
         if cdeal == "O":
             continue
 
         trade_id = generate_trade_id(item)
-        sgg_cd = str(item.get("sggCd", "")).strip()
+        sgg_cd = str(item.get("sggCd") or item.get("sgg_cd", "")).strip()
         sido_nm, sgg_nm = get_sgg_name(sgg_cd)
-        umd_nm = str(item.get("umdNm", "")).strip()
-        apt_nm = str(item.get("aptNm", "")).strip()
+        umd_nm = str(item.get("umdNm") or item.get("umd_nm", "")).strip()
+        apt_nm = str(item.get("aptNm") or item.get("apt_nm", "")).strip()
         jibun = str(item.get("jibun", "")).strip()
 
-        exclu_ar = _clean_float(item.get("excluUseAr"))
+        exclu_ar = _clean_float(item.get("excluUseAr") or item.get("exclu_use_ar"))
         # 평형 환산 (1평 = 3.30578 ㎡)
         pyeong = round(exclu_ar / 3.30578, 2) if exclu_ar > 0 else 0.0
 
-        year = _clean_int(item.get("dealYear"))
-        month = _clean_int(item.get("dealMonth"))
-        day = _clean_int(item.get("dealDay"))
+        year = _clean_int(item.get("dealYear") or item.get("deal_year"))
+        month = _clean_int(item.get("dealMonth") or item.get("deal_month"))
+        day = _clean_int(item.get("dealDay") or item.get("deal_day"))
         deal_date = f"{year:04d}-{month:02d}-{day:02d}"
 
-        amount = _clean_int(item.get("dealAmount"))
+        amount = _clean_int(item.get("dealAmount") or item.get("deal_amount"))
         price_per_pyeong = round(amount / pyeong, 1) if pyeong > 0 else 0.0
 
         floor = _clean_int(item.get("floor"))
-        build_year = _clean_int(item.get("buildYear"))
-        dealing_gbn = str(item.get("dealingGbn", "")).strip()
-        estate_agent = str(item.get("estateAgentSggNm", "")).strip()
-        rgst_date = str(item.get("rgstDate", "")).strip()
+        build_year = _clean_int(item.get("buildYear") or item.get("build_year"))
+        dealing_gbn = str(item.get("dealingGbn") or item.get("dealing_gbn", "")).strip()
+        estate_agent = str(item.get("estateAgentSggNm") or item.get("estate_agent_sgg_nm", "")).strip()
+        rgst_date = str(item.get("rgstDate") or item.get("rgst_date", "")).strip()
 
         insert_rows.append(
             (
@@ -213,8 +235,140 @@ def save_trades_to_sqlite(trades: list[dict], db_path: Optional[Path] = None) ->
     finally:
         conn.close()
 
+    # 데이터 적재 완료 후 일자별 요약 테이블 자동 동기화
+    try:
+        sync_daily_summary(target_path)
+    except Exception as e:
+        logger.warning("일자별 요약 자동 동기화 중 경고 발생: %s", e)
+
     logger.info("SQLite 적재 완료: 전달 %d건 중 신규 %d건 삽입", len(trades), inserted_count)
     return inserted_count
+
+
+def sync_daily_summary(
+    db_path: Optional[Path] = None,
+    target_date: Optional[str] = None,
+) -> int:
+    """apt_trades 테이블의 실거래 데이터를 기반으로 일자별 요약(daily_trade_summary)을 집계하여 갱신(Upsert)합니다.
+
+    거래건수, 총 거래대금, 건당 평균가, 평당 평균가, 최고 거래금액 및 해당 아파트명, 직거래/중개거래 건수를 산출하여 적재합니다.
+
+    Args:
+        db_path (Optional[Path]): 대상 SQLite 데이터베이스 경로 (기본값: data/processed/apt_trades.db).
+        target_date (Optional[str]): 특정 갱신 대상 일자 (예: '2026-10-01', 미지정 시 전체 일자 갱신).
+
+    Returns:
+        int: 갱신되거나 삽입된 일자 요약 행의 수.
+    """
+    target_path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    if not target_path.exists():
+        logger.warning("DB 파일이 존재하지 않아 일자별 요약 동기화를 건너뜁니다: %s", target_path)
+        return 0
+
+    init_db(target_path)
+    now_str = datetime.now().isoformat()
+
+    conn = sqlite3.connect(target_path)
+    try:
+        cursor = conn.cursor()
+
+        # 1. 일자별 기본 통계 산출
+        base_query = """
+            SELECT 
+                deal_date,
+                COUNT(*) as total_trades,
+                SUM(deal_amount) as total_amount,
+                ROUND(AVG(deal_amount), 2) as avg_amount,
+                ROUND(AVG(price_per_pyeong), 2) as avg_price_per_pyeong,
+                MAX(deal_amount) as max_amount,
+                SUM(CASE WHEN dealing_gbn = '직거래' THEN 1 ELSE 0 END) as direct_deal_count,
+                SUM(CASE WHEN dealing_gbn != '직거래' THEN 1 ELSE 0 END) as broker_deal_count
+            FROM apt_trades
+        """
+        params = []
+        if target_date:
+            base_query += " WHERE deal_date = ?"
+            params.append(target_date)
+        base_query += " GROUP BY deal_date ORDER BY deal_date DESC"
+
+        cursor.execute(base_query, params)
+        summary_rows = cursor.fetchall()
+
+        if not summary_rows:
+            return 0
+
+        # 2. 각 일자별 최고 거래가 아파트 및 시군구 정보 결합
+        upsert_records = []
+        for row in summary_rows:
+            d_date, t_trades, t_amount, avg_amt, avg_pyeong, max_amt, direct_cnt, broker_cnt = row
+
+            cursor.execute(
+                """
+                SELECT apt_nm, sgg_nm 
+                FROM apt_trades 
+                WHERE deal_date = ? AND deal_amount = ? 
+                LIMIT 1
+                """,
+                (d_date, max_amt),
+            )
+            top_apt = cursor.fetchone()
+            max_apt_name = top_apt[0] if top_apt else ""
+            max_sgg_nm = top_apt[1] if top_apt else ""
+
+            upsert_records.append(
+                (
+                    d_date,
+                    t_trades,
+                    t_amount,
+                    avg_amt,
+                    avg_pyeong,
+                    max_amt,
+                    max_apt_name,
+                    max_sgg_nm,
+                    direct_cnt,
+                    broker_cnt,
+                    now_str,
+                )
+            )
+
+        # 3. daily_trade_summary 테이블에 Upsert (INSERT OR REPLACE)
+        cursor.executemany(
+            """
+            INSERT OR REPLACE INTO daily_trade_summary (
+                deal_date, total_trades, total_amount, avg_amount, avg_price_per_pyeong,
+                max_amount, max_apt_name, max_sgg_nm, direct_deal_count, broker_deal_count, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            upsert_records,
+        )
+        conn.commit()
+        updated_count = len(upsert_records)
+        logger.info("일자별 요약(daily_trade_summary) 동기화 완료: 총 %d개 일자 갱신", updated_count)
+        return updated_count
+    finally:
+        conn.close()
+
+
+def get_daily_summary_records(db_path: Optional[Path] = None) -> pd.DataFrame:
+    """SQLite 데이터베이스의 일자별 요약 테이블 전체를 최신순으로 조회하여 반환합니다.
+
+    Args:
+        db_path (Optional[Path]): 대상 SQLite DB 파일 경로.
+
+    Returns:
+        pd.DataFrame: 일자별 요약 정보가 담긴 데이터프레임.
+    """
+    target_path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    if not target_path.exists():
+        return pd.DataFrame()
+
+    init_db(target_path)
+    conn = sqlite3.connect(target_path)
+    try:
+        query = "SELECT * FROM daily_trade_summary ORDER BY deal_date DESC"
+        return pd.read_sql_query(query, conn)
+    finally:
+        conn.close()
 
 
 def export_recent_trades_to_parquet(
